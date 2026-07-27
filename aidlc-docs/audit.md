@@ -652,3 +652,37 @@ U6 문서는 U2~U5의 as-built 기록과 달리 **구현 전에** 작성됨을 �
 **Context**: CONSTRUCTION - NFR-003 closed; U6 Functional Design Part 1 (plan) presented
 
 ---
+
+## Repo Cleanup / U6 Functional Design Generated
+**Timestamp**: 2026-07-27T09:30:00Z
+**User Input**: "1. `memo-from-frankie.md` 지워줘\n2. 작성자 이메일 상관 없어 그냥 내비둬\n3. U6 질문 4건 권장안대로 진행해줘\n4. 내가 또 답변 안한거 있는지 확인해줘"
+**AI Response**: "네 가지 전부 처리.
+
+1. memo-from-frankie.md 제거 커밋(f2059a2). 내용이 '# FilmAcquisition' 한 줄로 README.md와 중복이었음.
+
+2. 작성자 이메일 유지 — 조치 없음.
+
+4. 전 문서 [Answer]: 태그 스캔 결과 **미답변은 U6 4건뿐**. 나머지 요구사항/스토리/설계 단계 질문은 전부 답변 완료 상태.
+
+3. Q-FD-1~4 전부 권장안(A) 적용하고 Functional Design 문서 4종 생성:
+   - domain-entities.md — Signal/ComparableTitle 엔티티, SourceGrade 3종, 종류별 조건부 필수 표, Signal vs Comment 경계
+   - business-rules.md — BR-U6-001~011, 권한 매트릭스, 오류 코드, T8 트랜잭션
+   - business-logic-model.md — 도메인 순수 함수 D7/D8, 5개 흐름, 정책 반영, 테스트 설계, 마이그레이션 순서
+   - frontend-components.md — 근거 섹션 구조, 동적 폼, 등급 배지, 철회 UI, 접근성, 손 확인 14항목
+
+설계에서 새로 결정하고 근거를 남긴 것:
+- updatedAt 미배치(수정되지 않는 테이블임이 스키마에 드러나야 함)
+- sourceGrade 기본값 없음(있으면 가장 위험한 실수가 가장 조용히 일어남) — 화면 초기 선택도 비움
+- premiereStatus 백필 안 함(NONE으로 채우면 모르는 것을 '해당 없음'으로 단정)
+- 권한 없는 관측에 403이 아니라 404(403은 존재를 노출)
+- 검증 함수는 던지지 않고 문제 배열 반환(첫 오류에서 던지면 사용자가 오류를 하나씩 만남)
+- 종류별 필수 필드를 Record<SignalKind,...> 표로(if/else면 종류 추가 시 검증 누락, 표는 컴파일러가 지적)
+- 근거 섹션에 탭 미도입(카드 세로 구조에 탭 하나만 넣으면 탐색 방식이 둘이 됨)
+- 철회에 취소선 미사용(긴 한글은 읽을 수 없게 됨)
+- 신규 색 토큰 미생성(contrast.test.ts 검사 쌍 추가를 잊으면 검사 안 되는 색이 생김)
+
+계획서 체크박스 31개 전부 [x] 처리. UI 배선 검사 공백은 여전하므로 frontend-components.md 9절에 손 확인 14항목 명시."
+**Status**: ⏳ Functional Design 승인 대기
+**Context**: CONSTRUCTION - U6 Functional Design complete (Part 2)
+
+---
