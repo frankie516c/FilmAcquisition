@@ -1,0 +1,9 @@
+# 저장소에는 LF로 저장한다. Windows 작업 사본에서는 Git이 알아서 변환한다.
+# 이 파일이 없으면 OS가 다른 사람이 열 때 전 파일이 통째로 변경된 것처럼 보인다.
+* text=auto eol=lf
+
+# 바이너리로 취급 — 줄바꿈 변환 대상이 아니다
+*.png binary
+*.jpg binary
+*.ico binary
+*.pdf binary

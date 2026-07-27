@@ -1,0 +1,360 @@
+// Film Acquisition Dashboard — 전 엔티티 스키마
+// 설계 근거: aidlc-docs/construction/u1-foundation-auth/functional-design/domain-entities.md
+//
+// U1에서 10개 엔티티를 한 번에 정의한다. 유닛마다 마이그레이션이 누적 수정되는 것을 피하기 위함이다.
+// U1에서 실제로 동작하는 로직은 User·Session뿐이며, 나머지는 스키마와 리포지토리 인터페이스만 존재한다.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────
+// 열거형 (domain-entities.md 2절)
+// ─────────────────────────────────────────────────────────
+
+enum Role {
+  SCOUT
+  ANALYST
+  EXECUTIVE
+}
+
+enum Stage {
+  DISCOVERY
+  SCREENING
+  EVALUATION
+  OFFER
+  NEGOTIATION
+  CLOSED_WON
+  REJECTED
+}
+
+enum Genre {
+  DRAMA
+  THRILLER
+  COMEDY
+  ACTION
+  ROMANCE
+  HORROR
+  SF
+  FANTASY
+  ANIMATION
+  DOCUMENTARY
+  MYSTERY
+  WAR
+}
+
+enum Rating {
+  ALL
+  TWELVE
+  FIFTEEN
+  ADULT
+  RESTRICTED
+}
+
+/// 국가 9종 + 권역 5종. 권역과 국가가 겹칠 수 있으나 충돌 검증은 하지 않는다 (범위 밖).
+enum Territory {
+  KR
+  US
+  JP
+  CN
+  FR
+  GB
+  DE
+  IN
+  BR
+  ASIA
+  EUROPE
+  NORTH_AMERICA
+  LATIN_AMERICA
+  WORLDWIDE
+}
+
+enum ProductionCountry {
+  KR
+  US
+  JP
+  CN
+  FR
+  GB
+  DE
+  IN
+  BR
+}
+
+enum FestivalSection {
+  COMPETITION
+  NON_COMPETITION
+}
+
+enum NotificationType {
+  MENTION
+  OFFER_EXPIRY
+  RIGHTS_EXPIRY
+}
+
+// ─────────────────────────────────────────────────────────
+// User / Session — U1에서 동작
+// ─────────────────────────────────────────────────────────
+
+model User {
+  id String @id @default(cuid())
+
+  /// 소문자로 정규화해 저장한다 (BR-U1-001)
+  email String @unique
+  name  String
+
+  /// argon2id 해시. 필드 정책에서 전 역할 차단 — 어떤 응답에도 포함되지 않는다.
+  passwordHash String
+
+  role Role
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sessions          Session[]
+  assignedTitles    Title[]           @relation("TitleAssignee")
+  evaluations       Evaluation[]
+  comments          Comment[]
+  stageTransitions  StageTransition[]
+  notifications     Notification[]
+
+  /// 마지막 Executive 판정 시 count 조회 (BR-U1-009)
+  @@index([role])
+}
+
+model Session {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  /// 생성 시각 + 12시간. 쿠키는 Max-Age를 지정하지 않아 브라우저 종료 시 소멸한다.
+  expiresAt DateTime
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// ─────────────────────────────────────────────────────────
+// Title 및 하위 엔티티 — 스키마만, 동작은 U2 이후
+// ─────────────────────────────────────────────────────────
+
+model Title {
+  id String @id @default(cuid())
+
+  titleKo            String
+  titleOriginal      String?
+  director           String?
+  cast               String[]
+  genres             Genre[]
+  runtimeMinutes     Int?
+  productionCountry  ProductionCountry?
+  productionLanguage String?
+  productionYear     Int
+  rating             Rating?
+  synopsis           String?
+
+  stage Stage @default(DISCOVERY)
+
+  assigneeId String?
+  assignee   User?   @relation("TitleAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  festivalRecords  FestivalRecord[]
+  evaluations      Evaluation[]
+  comments         Comment[]
+  stageTransitions StageTransition[]
+  rightsGrants     RightsGrant[]
+  deal             Deal?
+  financialModel   FinancialModel?
+  notifications    Notification[]
+
+  @@index([stage])
+  /// UNIQUE가 아니다 — 중복은 차단이 아니라 경고다. 리메이크·동명이작이 실제로 존재한다 (US-001).
+  @@index([titleOriginal, productionYear])
+  @@index([assigneeId])
+  @@index([productionYear])
+  @@index([productionCountry])
+}
+
+model StageTransition {
+  id      String @id @default(cuid())
+  titleId String
+  title   Title  @relation(fields: [titleId], references: [id], onDelete: Cascade)
+
+  /// 작품 최초 생성 시 null
+  fromStage Stage?
+  toStage   Stage
+
+  changedById String?
+  changedBy   User?   @relation(fields: [changedById], references: [id], onDelete: SetNull)
+
+  occurredAt DateTime
+  note       String?
+
+  /// updatedAt을 두지 않는다 — 수정을 전제하지 않는 테이블임이 스키마에 드러난다 (append-only, FR-006).
+  createdAt DateTime @default(now())
+
+  @@index([titleId, occurredAt])
+}
+
+model Deal {
+  id      String @id @default(cuid())
+  titleId String @unique
+  title   Title  @relation(fields: [titleId], references: [id], onDelete: Cascade)
+
+  // 금액은 전부 BigInt(int8). 4바이트 정수는 약 21억이 상한이라
+  // P&A 예산·예상 매출에서 오버플로가 발생한다 (domain-entities.md 1.1절).
+  askingPrice        BigInt?
+  offerAmount        BigInt?
+  offerSubmittedAt   DateTime?
+  offerExpiryDate    DateTime?
+  minimumGuarantee   BigInt?
+  runningRoyaltyRate Float?
+  contractTerms      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// 마감 임박 위젯·알림 스캔
+  @@index([offerExpiryDate])
+}
+
+model FinancialModel {
+  id      String @id @default(cuid())
+  titleId String @unique
+  title   Title  @relation(fields: [titleId], references: [id], onDelete: Cascade)
+
+  paAndBudget     BigInt
+  otherCosts      BigInt @default(0)
+  expectedRevenue BigInt
+
+  // 계산 결과(총 인수비용·손익·ROI·손익분기)는 저장하지 않는다.
+  // 저장하면 입력값과 어긋날 수 있고, NFR-008의 "단일 정의"가 DB 사본으로 깨진다.
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model RightsGrant {
+  id      String @id @default(cuid())
+  titleId String
+  title   Title  @relation(fields: [titleId], references: [id], onDelete: Cascade)
+
+  territories       Territory[]
+  contractStartDate DateTime
+  /// > contractStartDate. 같은 날도 거부한다 (BR-U1-015).
+  contractEndDate   DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([contractEndDate])
+  @@index([titleId])
+}
+
+model Evaluation {
+  id      String @id @default(cuid())
+  titleId String
+  title   Title  @relation(fields: [titleId], references: [id], onDelete: Cascade)
+
+  evaluatorId String?
+  evaluator   User?   @relation(fields: [evaluatorId], references: [id], onDelete: SetNull)
+
+  // 각 1~5 정수 (BR-U1-014)
+  artistry       Int
+  commerciality  Int
+  buzz           Int
+  targetFit      Int
+
+  overallComment     String?
+  screeningDate      DateTime?
+  screeningVenue     String?
+  screeningAttendees String?
+  targetAudience     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// UNIQUE 제약 없음 — 평가자별 복수 평가를 보존한다 (US-009).
+  @@index([titleId])
+}
+
+model FestivalRecord {
+  id      String @id @default(cuid())
+  titleId String
+  title   Title  @relation(fields: [titleId], references: [id], onDelete: Cascade)
+
+  festivalName     String
+  year             Int
+  section          FestivalSection?
+  isAward          Boolean          @default(false)
+  awardName        String?
+  criticalResponse String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([titleId, year])
+}
+
+model Comment {
+  id      String @id @default(cuid())
+  titleId String
+  title   Title  @relation(fields: [titleId], references: [id], onDelete: Cascade)
+
+  authorId String?
+  author   User?   @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  body String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  notifications Notification[]
+
+  @@index([titleId, createdAt])
+}
+
+model Notification {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  type NotificationType
+
+  titleId String?
+  title   Title?  @relation(fields: [titleId], references: [id], onDelete: Cascade)
+
+  commentId String?
+  comment   Comment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  /// 화면 표시용 라벨. 멘션은 commentId, 마감은 "D-7" 등.
+  marker String
+
+  /// 중복 판정의 단일 근거. **NOT NULL이어야 한다.**
+  ///
+  /// 이전에는 [userId, type, titleId, marker] 조합으로 판정했으나, PostgreSQL에서
+  /// NULL은 서로 같지 않으므로 titleId가 NULL이면 UNIQUE 제약이 걸리지 않았다.
+  /// 작품과 무관한 알림이 추가되는 순간 중복 방지가 무력화되는 구조였다.
+  /// 생성 규칙은 src/domain/notification-key.ts 참조.
+  dedupeKey String
+
+  message String
+  isRead  Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, isRead])
+  /// 스캔이 동시에 두 번 실행되면 "존재 확인 → 생성" 사이에 경쟁 상태가 생긴다.
+  /// UNIQUE 제약이 있으면 두 번째 삽입이 실패하므로 중복이 생기지 않는다 (US-024).
+  /// 두 컬럼 모두 NOT NULL이라 NULL 예외가 발생하지 않는다.
+  @@unique([userId, dedupeKey])
+}

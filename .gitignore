@@ -1,0 +1,22 @@
+node_modules/
+.next/
+out/
+build/
+dist/
+
+# BR-U1-024 — 실제 비밀 값은 버전 관리에 넣지 않는다. .env.example만 커밋한다.
+.env
+.env.local
+.env.*.local
+
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+# 기기별 권한 설정 — 다른 사람의 환경에 강요할 것이 아니다
+.claude/settings.local.json
+coverage/
+*.tsbuildinfo
+next-env.d.ts

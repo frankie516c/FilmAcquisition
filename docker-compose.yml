@@ -1,0 +1,40 @@
+# BR-U1-022 기동 절차: DB healthcheck 통과 → 앱 기동 → 마이그레이션 → 시드 → 서버 시작
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: fad-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-fad}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fad_local_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-fad}
+      TZ: Asia/Seoul
+    ports:
+      - "5432:5432"
+    volumes:
+      - fad-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # 앱이 DB 준비 전에 마이그레이션을 시도하면 실패한다. 반드시 healthcheck를 건다.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fad} -d ${POSTGRES_DB:-fad}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build: .
+    container_name: fad-app
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-fad}:${POSTGRES_PASSWORD:-fad_local_dev}@db:5432/${POSTGRES_DB:-fad}?schema=public
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required}
+      SEED_PASSWORD: ${SEED_PASSWORD:-demo1234}
+      TZ: Asia/Seoul
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    command: sh -c "npx prisma migrate deploy && npx tsx prisma/seed.ts && node server.js"
+
+volumes:
+  fad-pgdata:
